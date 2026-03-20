@@ -1,0 +1,19 @@
+version: "3.8"
+
+services:
+  airflow:
+    image: apache/airflow:2.10.0
+    container_name: airflow_local
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__CORE__EXECUTOR: SequentialExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: sqlite:////opt/airflow/airflow.db
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./requirements.txt:/requirements.txt
+    ports:
+      - "8080:8080"
+    command: bash -c "pip install -r /requirements.txt && airflow db migrate && airflow standalone"
