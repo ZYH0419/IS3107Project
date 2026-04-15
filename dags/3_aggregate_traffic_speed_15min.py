@@ -90,7 +90,7 @@ with DAG(
     dag_id="3_aggregate_traffic_speed_15min",
     default_args=default_args,
     description="Aggregate recent traffic data into 15-minute history",
-    schedule="*/15 * * * *",
+    schedule="*/30 * * * *",
     start_date=datetime(2026, 3, 20),
     catchup=False,
     max_active_runs=1,

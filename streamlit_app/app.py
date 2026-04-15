@@ -133,7 +133,7 @@ def inject_css() -> None:
             height: 220px;
             width: 22px;
             border-radius: 999px;
-            background: linear-gradient(to top, #7f1d1d 0%, #b91c1c 18%, #f97316 40%, #facc15 68%, #86efac 100%);
+            background: linear-gradient(to top, #7f1d1d 0%, #b91c1c 25%, #f97316 50%, #facc15 75%, #86efac 100%);
             margin-right: 0.75rem;
         }
 
@@ -167,18 +167,24 @@ def inject_css() -> None:
 # ---------- Database ----------
 def get_database_url() -> str:
     candidates = [
-        st.secrets.get("SUPABASE_DB_URI") if "SUPABASE_DB_URI" in st.secrets else None,
         os.getenv("SUPABASE_DB_URI"),
-        st.secrets.get("DATABASE_URL") if "DATABASE_URL" in st.secrets else None,
         os.getenv("DATABASE_URL"),
-        st.secrets.get("SUPABASE_DB_URL") if "SUPABASE_DB_URL" in st.secrets else None,
         os.getenv("SUPABASE_DB_URL"),
     ]
+
+    try:
+        candidates.extend([
+            st.secrets.get("SUPABASE_DB_URI"),
+            st.secrets.get("DATABASE_URL"),
+            st.secrets.get("SUPABASE_DB_URL"),
+        ])
+    except Exception:
+        pass
 
     database_url = next((value for value in candidates if value), None)
     if not database_url:
         raise RuntimeError(
-            "No database URL found. Add SUPABASE_DB_URI, DATABASE_URL, or SUPABASE_DB_URL to Streamlit secrets or environment variables."
+            "No database URL found. Add SUPABASE_DB_URI, DATABASE_URL, or SUPABASE_DB_URL to environment variables or Streamlit secrets."
         )
 
     if database_url.startswith("postgresql+psycopg2://"):
@@ -192,55 +198,86 @@ def get_engine():
     return create_engine(get_database_url(), pool_pre_ping=True)
 
 
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=120, show_spinner=False)
 def load_latest_snapshot() -> tuple[pd.DataFrame, Optional[pd.Timestamp]]:
     engine = get_engine()
 
-    snapshot_time_sql = text(
+    latest_ts_sql = text(
         """
         SELECT MAX(collected_at) AS latest_ts
         FROM traffic_speed_latest
         """
     )
 
+    data_sql = text(
+        """
+        SELECT
+            rs.link_id,
+            COALESCE(rs.road_name, 'Unknown Road') AS road_name,
+            rs.road_category,
+            rs.start_lat,
+            rs.start_lon,
+            rs.end_lat,
+            rs.end_lon,
+            tsl.speed_band,
+            tsl.minimum_speed,
+            tsl.maximum_speed,
+            tsl.collected_at
+        FROM traffic_speed_latest AS tsl
+        JOIN road_segments AS rs
+          ON tsl.link_id = rs.link_id
+        WHERE rs.start_lat IS NOT NULL
+          AND rs.start_lon IS NOT NULL
+          AND rs.end_lat IS NOT NULL
+          AND rs.end_lon IS NOT NULL
+        """
+    )
+
     with engine.connect() as conn:
-        latest_ts_df = pd.read_sql(snapshot_time_sql, conn)
+        latest_ts_df = pd.read_sql(latest_ts_sql, conn)
         latest_ts = latest_ts_df.loc[0, "latest_ts"] if not latest_ts_df.empty else None
-
-        if pd.isna(latest_ts):
-            return pd.DataFrame(), None
-
-        query = text(
-            """
-            SELECT
-                rs.link_id,
-                COALESCE(rs.road_name, 'Unknown Road') AS road_name,
-                rs.road_category,
-                rs.start_lat,
-                rs.start_lon,
-                rs.end_lat,
-                rs.end_lon,
-                tsl.speed_band,
-                tsl.minimum_speed,
-                tsl.maximum_speed,
-                tsl.collected_at
-            FROM traffic_speed_latest AS tsl
-            JOIN road_segments AS rs
-              ON tsl.link_id = rs.link_id
-            WHERE tsl.collected_at = :latest_ts
-              AND rs.start_lat IS NOT NULL
-              AND rs.start_lon IS NOT NULL
-              AND rs.end_lat IS NOT NULL
-              AND rs.end_lon IS NOT NULL
-            """
-        )
-        df = pd.read_sql(query, conn, params={"latest_ts": latest_ts})
+        df = pd.read_sql(data_sql, conn)
 
     if df.empty:
-        return df, pd.to_datetime(latest_ts, utc=True)
+        return pd.DataFrame(), pd.to_datetime(latest_ts, utc=True) if latest_ts is not None else None
 
-    df["avg_speed"] = (df["minimum_speed"].fillna(0) + df["maximum_speed"].fillna(0)) / 2.0
-    df["avg_speed_label"] = df["avg_speed"].round(1)
+    for col in [
+        "link_id",
+        "speed_band",
+        "minimum_speed",
+        "maximum_speed",
+        "start_lat",
+        "start_lon",
+        "end_lat",
+        "end_lon",
+    ]:
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    # Compute estimated speed for tooltip only
+    df["avg_speed"] = df[["minimum_speed", "maximum_speed"]].mean(axis=1, skipna=True)
+
+    df["avg_speed_label"] = df["avg_speed"].apply(
+        lambda x: f"{x:.1f}" if pd.notna(x) else "N/A"
+    )
+    df["speed_band_label"] = df["speed_band"].apply(
+        lambda x: str(int(x)) if pd.notna(x) else "N/A"
+    )
+    df["minimum_speed_label"] = df["minimum_speed"].apply(
+        lambda x: f"{x:.0f}" if pd.notna(x) else "N/A"
+    )
+    df["maximum_speed_label"] = df["maximum_speed"].apply(
+        lambda x: f"{x:.0f}" if pd.notna(x) else "N/A"
+    )
+
+    df["collected_at"] = pd.to_datetime(df["collected_at"], utc=True, errors="coerce")
+    df["last_valid_update_label"] = df["collected_at"].apply(
+        lambda x: x.tz_convert("Asia/Singapore").strftime("%d %b %Y, %I:%M %p SGT")
+        if pd.notna(x)
+        else "N/A"
+    )
+
+    df = df.dropna(subset=["start_lat", "start_lon", "end_lat", "end_lon"]).copy()
+
     df["path"] = df.apply(
         lambda row: [
             [float(row["start_lon"]), float(row["start_lat"])],
@@ -248,24 +285,29 @@ def load_latest_snapshot() -> tuple[pd.DataFrame, Optional[pd.Timestamp]]:
         ],
         axis=1,
     )
-    df["color"] = df["avg_speed"].apply(speed_to_color)
-    return df, pd.to_datetime(latest_ts, utc=True)
+
+    # Use speed band for map coloring
+    df["color"] = df["speed_band"].apply(speed_band_to_color)
+
+    return df, pd.to_datetime(latest_ts, utc=True) if latest_ts is not None else None
 
 
 # ---------- Map helpers ----------
-def speed_to_color(speed: float) -> list[int]:
-    """Lower speed = more congested = redder."""
-    if pd.isna(speed):
-        return [148, 163, 184, 180]
-    if speed <= 20:
-        return [127, 29, 29, 220]
-    if speed <= 35:
-        return [185, 28, 28, 220]
-    if speed <= 50:
-        return [249, 115, 22, 220]
-    if speed <= 65:
-        return [250, 204, 21, 220]
-    return [134, 239, 172, 220]
+def speed_band_to_color(band: float) -> list[int]:
+
+    # UNAVAILABLE → very light grey (blend into map)
+    if pd.isna(band):
+        return [200, 200, 200, 120]  # light + semi-transparent
+
+    band = int(band)
+
+    if band <= 2:
+        return [180, 30, 30, 220]   # red
+    if band <= 4:
+        return [255, 120, 0, 220]   # orange
+    if band <= 6:
+        return [255, 200, 0, 220]   # yellow
+    return [80, 200, 120, 220]      # green
 
 
 # ---------- UI ----------
@@ -285,7 +327,6 @@ def render_hero() -> None:
     )
 
 
-
 def render_map_section(df: pd.DataFrame, latest_ts: Optional[pd.Timestamp]) -> None:
     st.markdown('<section class="section-wrap">', unsafe_allow_html=True)
 
@@ -300,14 +341,23 @@ def render_map_section(df: pd.DataFrame, latest_ts: Optional[pd.Timestamp]) -> N
             ts_display = "No data available"
 
         st.markdown('<div class="map-title">Singapore Real-Time Road Speed</div>', unsafe_allow_html=True)
-        st.markdown(f'<div class="map-subtitle">Last refreshed: {ts_display}</div>', unsafe_allow_html=True)
+        st.markdown(
+            f'<div class="map-subtitle">Latest valid update in table: {ts_display}</div>',
+            unsafe_allow_html=True,
+        )
 
         if df.empty:
             st.warning(
-                "No traffic data found in Supabase. Check the connection string, whether Airflow has inserted rows into traffic_speed_latest, and whether road_segments has been loaded."
+                "No traffic data found in Supabase. Check whether traffic_speed_latest and road_segments exist and whether Airflow has inserted rows."
             )
         else:
-            view_state = pdk.ViewState(latitude=1.3521, longitude=103.8198, zoom=11, pitch=0)
+            view_state = pdk.ViewState(
+                latitude=1.3521,
+                longitude=103.8198,
+                zoom=11,
+                pitch=0,
+            )
+
             layer = pdk.Layer(
                 "PathLayer",
                 data=df,
@@ -325,7 +375,16 @@ def render_map_section(df: pd.DataFrame, latest_ts: Optional[pd.Timestamp]) -> N
                 initial_view_state=view_state,
                 layers=[layer],
                 tooltip={
-                    "html": "<b>{road_name}</b><br/>Link ID: {link_id}<br/>Road category: {road_category}<br/>Speed band: {speed_band}<br/>Estimated speed: {avg_speed_label} km/h",
+                    "html": """
+                        <b>{road_name}</b><br/>
+                        Link ID: {link_id}<br/>
+                        Road category: {road_category}<br/>
+                        Speed band: {speed_band_label}<br/>
+                        Minimum speed: {minimum_speed_label} km/h<br/>
+                        Maximum speed: {maximum_speed_label} km/h<br/>
+                        Estimated speed: {avg_speed_label} km/h<br/>
+                        Last valid update: {last_valid_update_label}
+                    """,
                     "style": {
                         "backgroundColor": "rgba(15,23,42,0.95)",
                         "color": "white",
@@ -339,15 +398,15 @@ def render_map_section(df: pd.DataFrame, latest_ts: Optional[pd.Timestamp]) -> N
         st.markdown(
             """
             <div class="legend-box">
-                <div class="legend-title">Congestion Level</div>
+                <div class="legend-title">Speed Band</div>
                 <div class="legend-flex">
                     <div class="legend-gradient"></div>
                     <div class="legend-labels">
-                        <div>Fast (&gt; 65 km/h)</div>
-                        <div>Moderate (50–65)</div>
-                        <div>Slow (35–50)</div>
-                        <div>Heavy (20–35)</div>
-                        <div>Severe (&le; 20 km/h)</div>
+                        <div>Band 7–8 (Fast, 60+ km/h)</div>
+                        <div>Band 5–6 (Moderate, 40–59)</div>
+                        <div>Band 3–4 (Slow, 20–39)</div>
+                        <div>Band 1–2 (Severe, 0–19)</div>
+                        <div>Unavailable</div>
                     </div>
                 </div>
             </div>
@@ -356,11 +415,22 @@ def render_map_section(df: pd.DataFrame, latest_ts: Optional[pd.Timestamp]) -> N
         )
 
         if not df.empty:
+            valid_speed_count = int(df["avg_speed"].notna().sum())
+            unavailable_count = int(df["avg_speed"].isna().sum())
+
             st.markdown(
                 f"""
                 <div class="metric-card">
                     <div><b>Segments loaded</b></div>
                     <div>{len(df):,}</div>
+                </div>
+                <div class="metric-card">
+                    <div><b>Usable speed rows</b></div>
+                    <div>{valid_speed_count:,}</div>
+                </div>
+                <div class="metric-card">
+                    <div><b>Unavailable rows</b></div>
+                    <div>{unavailable_count:,}</div>
                 </div>
                 """,
                 unsafe_allow_html=True,

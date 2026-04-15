@@ -75,7 +75,7 @@ with DAG(
     dag_id="2_refresh_traffic_speed",
     default_args=default_args,
     description="Refresh traffic snapshot page by page and save immediately",
-    schedule="*/5 * * * *",
+    schedule="*/10 * * * *",
     start_date=datetime(2026, 3, 20),
     catchup=False,
     max_active_runs=1,
