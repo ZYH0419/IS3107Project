@@ -51,26 +51,53 @@ The system ingests live traffic data from LTA DataMall, processes it, and visual
 git clone <https://github.com/ZYH0419/IS3107Project>
 cd <IS3107PROJECT>
 ```
+---
+
+### 2. Create and activate a virtual environment
+
+```bash
+python -m venv venv
+source venv/bin/activate
+```
+
+on Windows:
+```bash
+venv\\Scripts\\activate
+```
 
 ---
 
-### 2. Set up environment variables
+### 3. Install Python dependencies
+
+```bash
+pip install -r requirements.txt
+```
+
+---
+
+### 4. Set up environment variables
 
 Create a `.env` file:
 
 ```env
 SUPABASE_DB_URI=your_supabase_connection_string
 LTA_API_KEY=your_lta_api_key
+RECENT_RETENTION_HOURS=24
 ```
 
 ---
 
-### 3. Start Docker (Airflow + Streamlit)
+### 5. Start Docker (Airflow + Streamlit)
 
 Make sure Docker is running, then:
 
 ```bash
 docker compose up --build
+```
+if you want to run in the background,
+
+```bash
+docker compose up --build -d
 ```
 
 This will start:
@@ -83,18 +110,24 @@ This will start:
 
 ### Airflow UI
 
+```
 http://localhost:8080
+```
 
 Default login:
 
+```
 username: airflow  
 password: airflow  
+```
 
 ---
 
 ### Streamlit Dashboard
 
+```
 http://localhost:8501
+```
 
 ---
 
@@ -152,6 +185,17 @@ The Streamlit app:
   - Last valid update time
 
 ---
+
+### Stop the Services
+
+To stop the containers:
+
+```bash
+docker compose down
+```
+
+---
+
 
 ## ⚠️ Notes
 
