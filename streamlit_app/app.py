@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from dotenv import load_dotenv
+load_dotenv()
+
 import os
 from typing import Optional
 
@@ -189,7 +192,7 @@ def get_engine():
     return create_engine(get_database_url(), pool_pre_ping=True)
 
 
-@st.cache_data(ttl=60, show_spinner=False)
+@st.cache_data(ttl=300, show_spinner=False)
 def load_latest_snapshot() -> tuple[pd.DataFrame, Optional[pd.Timestamp]]:
     engine = get_engine()
 

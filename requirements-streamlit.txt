@@ -1,0 +1,12 @@
+streamlit
+pandas
+psycopg2-binary
+sqlalchemy
+python-dotenv
+pydeck
+plotly
+
+geopandas
+shapely
+osmnx
+scikit-learn

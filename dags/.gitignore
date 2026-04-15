@@ -5,3 +5,5 @@
 # python (optional)
 __pycache__/
 *.pyc
+
+venv/

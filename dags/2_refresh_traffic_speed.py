@@ -1,5 +1,5 @@
 from airflow import DAG
-from airflow.operators.python import PythonOperator
+from airflow.providers.standard.operators.python import PythonOperator
 from datetime import datetime, timedelta, timezone
 import logging
 import traceback
@@ -9,6 +9,7 @@ from lta_common import (
     build_snapshots_df,
     get_connection,
     insert_snapshot_rows,
+    upsert_latest_snapshot_rows,
 )
 
 logger = logging.getLogger(__name__)
@@ -32,34 +33,28 @@ def refresh_traffic_speed():
         collected_at = datetime.now(timezone.utc)
         logger.info("STEP 3: snapshot timestamp = %s", collected_at)
 
-        # overwrite latest snapshot table first
-        with conn.cursor() as cur:
-            cur.execute("TRUNCATE TABLE traffic_speed_latest")
-        conn.commit()
-        logger.info("STEP 4: traffic_speed_latest truncated")
-
         total_rows_latest = 0
         total_rows_recent = 0
         total_pages = 0
 
         for skip, df_page in iter_speed_bands_pages(page_size=500):
-            logger.info("STEP 5: processing page skip=%s rows=%s", skip, len(df_page))
+            logger.info("STEP 4: processing page skip=%s rows=%s", skip, len(df_page))
 
             snapshots_df = build_snapshots_df(df_page, collected_at)
-            logger.info("STEP 6: built snapshot dataframe rows=%s", len(snapshots_df))
+            logger.info("STEP 5: built cleaned snapshot dataframe rows=%s", len(snapshots_df))
 
-            # save immediately to latest
-            insert_snapshot_rows(conn, "traffic_speed_latest", snapshots_df, batch_size=500)
+            # latest table = latest known usable state
+            upsert_latest_snapshot_rows(conn, snapshots_df, batch_size=500)
             total_rows_latest += len(snapshots_df)
 
-            # save immediately to recent history
+            # recent table = raw cleaned history
             insert_snapshot_rows(conn, "traffic_speed_recent", snapshots_df, batch_size=500)
             total_rows_recent += len(snapshots_df)
 
             total_pages += 1
 
             logger.info(
-                "STEP 7: page saved skip=%s | pages=%s | latest_rows=%s | recent_rows=%s",
+                "STEP 6: page saved skip=%s | pages=%s | latest_rows=%s | recent_rows=%s",
                 skip, total_pages, total_rows_latest, total_rows_recent
             )
 
