@@ -1,223 +1,175 @@
-# IS3107Project
+# Smart City Traffic Analytics System
 
-📌 Project Title
+Real-time traffic data pipeline and visualization system built using Airflow, Supabase, and Streamlit.  
+The system ingests live traffic data from LTA DataMall, processes it, and visualizes road-level congestion across Singapore.
 
-Real-Time Smart Traffic Monitoring and Congestion Prediction System
+---
 
-🏙️ Problem Statement (Smart City Context)
+## 🚀 Features
 
-Urban traffic congestion is a major challenge in modern smart cities. It leads to increased travel time, higher fuel consumption, and environmental pollution. Traditional traffic monitoring systems often rely on static analysis or delayed reporting, which limits their ability to support real-time decision-making.
+- Real-time traffic ingestion (LTA API, 5–10 min frequency)
+- Airflow-based ETL pipeline (DAG 2–4)
+- Optimized data models (`latest`, `recent`, `aggregated`)
+- Geospatial visualization using Streamlit + PyDeck
+- Handling of missing data and incremental updates
 
-This project aims to build a real-time traffic data pipeline and analytics system that:
+---
 
-continuously ingests traffic speed data across Singapore
+## 🏗️ Tech Stack
 
-visualizes current traffic conditions on an interactive map
+- Python
+- Apache Airflow (Docker)
+- Supabase (PostgreSQL)
+- Streamlit + PyDeck
+- Pandas / SQLAlchemy
 
-captures short-term temporal patterns for congestion analysis
+---
 
-lays the foundation for predictive modeling using machine learning
+## 📁 Project Structure (Simplified)
 
-The system follows a modern data engineering + MLOps architecture, enabling scalable, automated, and intelligent traffic analysis.
+```
+.
+├── dags/
+│   ├── 2_refresh_traffic_speed.py
+│   ├── 3_aggregate_traffic_speed_15min.py
+│   ├── 4_cleanup_recent_history.py
+│   └── lta_common.py
+├── streamlit_app/
+│   └── app.py
+├── docker-compose.yaml
+├── requirements.txt
+└── .env
+```
 
-📡 Data Source
+---
 
-The system uses the LTA DataMall Traffic Speed Bands API, which provides:
+## ⚙️ Setup Instructions
 
-road segment-level traffic speed data
+### 1. Clone the repository
 
-speed categorized into discrete “speed bands”
+```bash
+git clone <https://github.com/ZYH0419/IS3107Project>
+cd <IS3107PROJECT>
+```
 
-geospatial information (start/end coordinates of road segments)
+---
 
-Each API snapshot contains approximately 140k+ records, representing traffic conditions across major road segments in Singapore.
+### 2. Set up environment variables
 
-To ensure complete data retrieval, the system uses paginated API requests ($skip), iteratively fetching all pages until no further data is returned.
+Create a `.env` file:
 
-⚙️ Data Pipeline Architecture
+```env
+SUPABASE_DB_URI=your_supabase_connection_string
+LTA_API_KEY=your_lta_api_key
+```
 
-The system is orchestrated using Apache Airflow, which automates data ingestion, transformation, and aggregation through scheduled workflows (DAGs).
+---
 
-🔄 DAG 1: load_road_segments
+### 3. Start Docker (Airflow + Streamlit)
 
-Purpose: populate static road metadata
+Make sure Docker is running, then:
 
-Extracts:
+```bash
+docker compose up --build
+```
 
-LinkID, RoadName, RoadCategory
+This will start:
+- Airflow (scheduler + webserver)
+- Streamlit app
 
-geographic coordinates
+---
 
-Stores into:
+## 🌐 Access the Applications
 
-road_segments (dimension table)
+### Airflow UI
 
-Execution: manual or infrequent
+http://localhost:8080
 
-🔁 DAG 2: refresh_traffic_speed (every 5 minutes)
+Default login:
 
-This is the core real-time pipeline.
+username: airflow  
+password: airflow  
 
-Steps:
+---
 
-Fetch full dataset (~143k rows) via paginated API calls
+### Streamlit Dashboard
 
-Construct snapshot dataframe
+http://localhost:8501
 
-Update:
+---
 
-traffic_speed_latest (overwrite)
+## 🔄 Running the Pipeline
 
-traffic_speed_recent (append)
+### DAG Overview
 
-Prune old data from traffic_speed_recent
+| DAG | Purpose |
+|-----|--------|
+| DAG 2 | Fetch + clean traffic data → Supabase |
+| DAG 3 | Aggregate into 15-min intervals |
+| DAG 4 | Clean up old historical data |
 
-Purpose:
+---
 
-maintain real-time traffic state
+### Recommended Execution Order
 
-preserve short-term history for temporal analysis
+1. Run **DAG 2** (data ingestion)
+2. Run **DAG 3** (aggregation)
+3. Optionally run **DAG 4** (cleanup)
 
-📊 DAG 3: aggregate_traffic_speed_15min (every 15 minutes)
+---
 
-Steps:
+### Scheduling
 
-Read from traffic_speed_recent
+Typical setup:
 
-Aggregate into 15-minute intervals
+- DAG 2 → every **10 minutes**
+- DAG 3 → every **15–30 minutes**
+- DAG 4 → every **1 hour**
 
-Compute:
+---
 
-average speed band
+## 🗄️ Database Tables
 
-min/max speed band
+| Table | Description |
+|------|------------|
+| `traffic_speed_latest` | Latest valid speed per road |
+| `traffic_speed_recent` | Short-term history (rolling window) |
+| `traffic_speed_15min` | Aggregated time-series data |
+| `road_segments` | Geospatial road network |
 
-sample counts
+---
 
-Upsert into traffic_speed_15min
+## 🗺️ Visualization
 
-Purpose:
+The Streamlit app:
 
-reduce storage footprint
+- Displays road-level congestion using `speed_band`
+- Uses PyDeck for map rendering
+- Grey roads = unavailable data
+- Tooltip shows:
+  - Speed band
+  - Min / max speed
+  - Last valid update time
 
-preserve meaningful temporal patterns
+---
 
-support downstream analytics and ML
+## ⚠️ Notes
 
-🗄️ Database Design (Supabase / PostgreSQL)
+- Supabase free tier has storage limits — `traffic_speed_recent` is automatically cleaned via DAG 4
+- Missing data is **not treated as 0**; historical values are preserved where applicable
+- Some networks (e.g. school WiFi) may block direct DB connections — use connection pooling if needed
 
-The system uses a layered data storage strategy to balance performance and scalability.
+---
 
-1. road_segments (static dimension table)
+## 🧠 Future Improvements
 
-Stores:
+- Time-series prediction model (traffic forecasting)
+- Delta table for incremental updates
+- Parquet-based storage for ML pipelines
+- Time slider / animation in Streamlit
 
-road metadata
+---
 
-geospatial coordinates
+## 👤 Author
 
-Used for:
-
-map visualization
-
-feature enrichment
-
-2. traffic_speed_latest (real-time layer)
-
-Stores:
-
-most recent snapshot only
-
-Used for:
-
-Streamlit dashboard
-
-live traffic visualization
-
-3. traffic_speed_recent (short-term raw history)
-
-Stores:
-
-last 30 minutes to 24 hours of raw data
-
-Used for:
-
-temporal consistency analysis
-
-lag feature construction
-
-near-term congestion reasoning
-
-4. traffic_speed_15min (compressed historical layer)
-
-Stores:
-
-15-minute aggregated traffic data
-
-Used for:
-
-peak-hour analysis
-
-long-term trends
-
-machine learning feature generation
-
-📊 Real-Time Visualization
-
-A Streamlit dashboard is used to visualize:
-
-road segments on a map
-
-traffic conditions using color-coded speed bands
-
-real-time updates from traffic_speed_latest
-
-The visualization enables users to:
-
-identify congestion hotspots
-
-observe spatial traffic patterns
-
-interactively explore traffic conditions
-
-🤖 MLOps (Planned Extension)
-
-The system is designed to support a full MLOps pipeline, including:
-
-Feature Engineering
-
-time-based features (hour, weekday)
-
-lag features (previous traffic states)
-
-rolling statistics
-
-weather integration
-
-Model Training
-
-predict congestion or future speed bands
-
-models such as XGBoost or time-series models
-
-Monitoring
-
-track model performance (RMSE, accuracy)
-
-detect:
-
-data drift
-
-feature drift
-
-prediction drift
-
-Automated Retraining
-
-triggered by:
-
-performance degradation
-
-drift thresholds
-
-orchestrated via Airflow DAGs
+Built as part of a Smart City / Data Engineering project.
