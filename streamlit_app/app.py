@@ -11,6 +11,11 @@ import pydeck as pdk
 import streamlit as st
 from sqlalchemy import create_engine, text
 
+try:
+    from data_analysis import render_data_analysis_section
+except ImportError:
+    from streamlit_app.data_analysis import render_data_analysis_section
+
 
 st.set_page_config(
     page_title="Smart City",
@@ -443,6 +448,7 @@ def render_map_section(df: pd.DataFrame, latest_ts: Optional[pd.Timestamp]) -> N
 def main() -> None:
     inject_css()
     render_hero()
+    render_data_analysis_section()
 
     try:
         df, latest_ts = load_latest_snapshot()

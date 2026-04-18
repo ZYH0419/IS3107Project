@@ -5,6 +5,7 @@ sqlalchemy
 python-dotenv
 pydeck
 plotly
+openpyxl
 
 geopandas
 shapely
