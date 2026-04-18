@@ -18,6 +18,7 @@ x-airflow-common: &airflow-common
     - ./config:/opt/airflow/config
     - ./plugins:/opt/airflow/plugins
     - ./requirements-airflow.txt:/requirements-airflow.txt
+    - ./raw_data:/opt/airflow/raw_data
   user: "${AIRFLOW_UID:-50000}:0"
   depends_on: &airflow-common-depends-on
     postgres:

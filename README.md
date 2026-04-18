@@ -104,6 +104,13 @@ This will start:
 - Airflow (scheduler + webserver)
 - Streamlit app
 
+If you have made any change and want to rebuild, use:
+
+```bash
+docker compose restart
+```
+
+and refresh the portal again.
 ---
 
 ## 🌐 Access the Applications
