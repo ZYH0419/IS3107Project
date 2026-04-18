@@ -9,6 +9,7 @@ from typing import Optional
 import pandas as pd
 import pydeck as pdk
 import streamlit as st
+import matplotlib.pyplot as plt
 from sqlalchemy import create_engine, text
 
 
@@ -165,27 +166,12 @@ def inject_css() -> None:
 
 
 # ---------- Database ----------
-def get_database_url() -> str:
-    candidates = [
-        st.secrets.get("SUPABASE_DB_URI") if "SUPABASE_DB_URI" in st.secrets else None,
-        os.getenv("SUPABASE_DB_URI"),
-        st.secrets.get("DATABASE_URL") if "DATABASE_URL" in st.secrets else None,
-        os.getenv("DATABASE_URL"),
-        st.secrets.get("SUPABASE_DB_URL") if "SUPABASE_DB_URL" in st.secrets else None,
-        os.getenv("SUPABASE_DB_URL"),
-    ]
+def get_database_url():
+    url = os.getenv("SUPABASE_DB_URI")
+    if not url:
+        raise RuntimeError("SUPABASE_DB_URI not found in environment variables")
 
-    database_url = next((value for value in candidates if value), None)
-    if not database_url:
-        raise RuntimeError(
-            "No database URL found. Add SUPABASE_DB_URI, DATABASE_URL, or SUPABASE_DB_URL to Streamlit secrets or environment variables."
-        )
-
-    if database_url.startswith("postgresql+psycopg2://"):
-        database_url = database_url.replace("postgresql+psycopg2://", "postgresql://", 1)
-
-    return database_url
-
+    return url
 
 @st.cache_resource(show_spinner=False)
 def get_engine():
@@ -284,6 +270,68 @@ def render_hero() -> None:
         unsafe_allow_html=True,
     )
 
+@st.cache_data(ttl=300, show_spinner=False)
+def load_traffic_data(mode: str = "latest"):
+
+    engine = get_engine()
+
+    if mode == "latest":
+        latest_ts_sql = text("""
+            SELECT MAX(interval_start) AS latest_ts
+            FROM traffic_speed_15min
+        """)
+
+        with engine.connect() as conn:
+            latest_ts_df = pd.read_sql(latest_ts_sql, conn)
+            latest_ts = latest_ts_df.loc[0, "latest_ts"]
+
+            if pd.isna(latest_ts):
+                return pd.DataFrame(), None
+
+            query = text("""
+                SELECT
+                    t.interval_start,
+                    t.link_id,
+                    t.avg_speed_band,
+                    t.avg_minimum_speed,
+                    t.avg_maximum_speed,
+                    r.road_name,
+                    r.road_category,
+                    r.start_lat,
+                    r.start_lon,
+                    r.end_lat,
+                    r.end_lon
+                FROM traffic_speed_15min t
+                JOIN road_segments r
+                  ON t.link_id = r.link_id
+                WHERE t.interval_start = :ts
+            """)
+
+            df = pd.read_sql(query, conn, params={"ts": latest_ts})
+
+        return df, pd.to_datetime(latest_ts, utc=True)
+
+    elif mode == "history":
+        query = """
+        SELECT
+            t.interval_start,
+            t.link_id,
+            t.avg_speed_band,
+            t.avg_minimum_speed,
+            t.avg_maximum_speed,
+            t.samples,
+            r.road_name,
+            r.road_category
+        FROM traffic_speed_15min t
+        JOIN road_segments r
+          ON t.link_id = r.link_id
+        """
+
+        df = pd.read_sql(query, engine)
+        df["interval_start"] = pd.to_datetime(df["interval_start"])
+
+        return df, None
+
 
 
 def render_map_section(df: pd.DataFrame, latest_ts: Optional[pd.Timestamp]) -> None:
@@ -369,6 +417,7 @@ def render_map_section(df: pd.DataFrame, latest_ts: Optional[pd.Timestamp]) -> N
     st.markdown("</section>", unsafe_allow_html=True)
 
 
+
 # ---------- App ----------
 def main() -> None:
     inject_css()
@@ -377,10 +426,66 @@ def main() -> None:
     try:
         df, latest_ts = load_latest_snapshot()
         render_map_section(df, latest_ts)
+
+        # ---------- DASHBOARD SECTION ----------
+        st.markdown("## Traffic Data Insights")
+
+        history_df, _ = load_traffic_data("history")
+
+        if history_df.empty:
+            st.info("No historical data available for EDA.")
+            return
+
+        # create derived feature
+        history_df["hour"] = history_df["interval_start"].dt.hour
+
+        # ---------- LAYOUT: 2 PANELS ----------
+        col1, col2 = st.columns(2, gap="large")
+
+        # ===== LEFT PANEL: Distribution =====
+        with col1:
+            st.markdown("### Speed Distribution")
+
+            fig1, ax1 = plt.subplots()
+            ax1.hist(history_df["avg_speed_band"].dropna(), bins=40)
+            ax1.set_xlabel("Speed Band")
+            ax1.set_ylabel("Frequency")
+            ax1.set_facecolor("#0b1220")
+            st.pyplot(fig1)
+
+        # ===== RIGHT PANEL: Time Pattern =====
+        with col2:
+            st.markdown("### Hourly Traffic Pattern")
+
+            hourly = history_df.groupby("hour")["avg_speed_band"].mean()
+
+            fig2, ax2 = plt.subplots()
+            ax2.plot(hourly.index, hourly.values)
+            ax2.set_xlabel("Hour of Day")
+            ax2.set_ylabel("Avg Speed Band")
+            ax2.set_xticks(range(0, 24, 2))
+            ax2.grid(alpha=0.2)
+
+            st.pyplot(fig2)
+
+        # ---------- SUMMARY ROW ----------
+        st.markdown("### Dataset Summary")
+
+        m1, m2, m3 = st.columns(3)
+
+        with m1:
+            st.metric("Total Records", len(history_df))
+
+        with m2:
+            st.metric("Avg Speed", round(history_df["avg_speed_band"].mean(), 2))
+
+        with m3:
+            st.metric("Time Range", f"{history_df['interval_start'].nunique()} intervals")
+
     except Exception as exc:
         st.markdown('<section class="section-wrap">', unsafe_allow_html=True)
         st.error(
-            "Could not load data from Supabase. Check your secrets, environment variables, and whether the tables traffic_speed_latest and road_segments exist with the expected columns."
+            "Could not load data from Supabase. Check your secrets, environment variables, and whether the tables exist."
         )
         st.exception(exc)
         st.markdown("</section>", unsafe_allow_html=True)
