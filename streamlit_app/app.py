@@ -237,7 +237,44 @@ def load_latest_snapshot() -> tuple[pd.DataFrame, Optional[pd.Timestamp]]:
     df["color"] = df["avg_speed"].apply(speed_to_color)
     return df, pd.to_datetime(latest_ts, utc=True)
 
+@st.cache_data(ttl=300, show_spinner=False)
+def load_history_data(days: int = 7) -> pd.DataFrame:
 
+    engine = get_engine()
+
+    query = text(f"""
+        SELECT
+            t.collected_at,
+            t.link_id,
+            t.speed_band,
+            t.minimum_speed,
+            t.maximum_speed,
+            r.road_name,
+            r.road_category
+        FROM traffic_speed_latest t
+        JOIN road_segments r
+          ON t.link_id = r.link_id
+        WHERE t.collected_at >= NOW() - INTERVAL '{days} days'
+        ORDER BY t.collected_at DESC
+    """)
+
+    with engine.connect() as conn:
+        df = pd.read_sql(query, conn)
+
+    if df.empty:
+        return df
+
+    # ---------- Feature engineering ----------
+    df["collected_at"] = pd.to_datetime(df["collected_at"], utc=True)
+
+    df["avg_speed"] = (
+        df["minimum_speed"].fillna(0) +
+        df["maximum_speed"].fillna(0)
+    ) / 2.0
+
+    df["hour"] = df["collected_at"].dt.hour
+
+    return df
 # ---------- Map helpers ----------
 def speed_to_color(speed: float) -> list[int]:
     """Lower speed = more congested = redder."""
@@ -270,67 +307,6 @@ def render_hero() -> None:
         unsafe_allow_html=True,
     )
 
-@st.cache_data(ttl=300, show_spinner=False)
-def load_traffic_data(mode: str = "latest"):
-
-    engine = get_engine()
-
-    if mode == "latest":
-        latest_ts_sql = text("""
-            SELECT MAX(interval_start) AS latest_ts
-            FROM traffic_speed_15min
-        """)
-
-        with engine.connect() as conn:
-            latest_ts_df = pd.read_sql(latest_ts_sql, conn)
-            latest_ts = latest_ts_df.loc[0, "latest_ts"]
-
-            if pd.isna(latest_ts):
-                return pd.DataFrame(), None
-
-            query = text("""
-                SELECT
-                    t.interval_start,
-                    t.link_id,
-                    t.avg_speed_band,
-                    t.avg_minimum_speed,
-                    t.avg_maximum_speed,
-                    r.road_name,
-                    r.road_category,
-                    r.start_lat,
-                    r.start_lon,
-                    r.end_lat,
-                    r.end_lon
-                FROM traffic_speed_15min t
-                JOIN road_segments r
-                  ON t.link_id = r.link_id
-                WHERE t.interval_start = :ts
-            """)
-
-            df = pd.read_sql(query, conn, params={"ts": latest_ts})
-
-        return df, pd.to_datetime(latest_ts, utc=True)
-
-    elif mode == "history":
-        query = """
-        SELECT
-            t.interval_start,
-            t.link_id,
-            t.avg_speed_band,
-            t.avg_minimum_speed,
-            t.avg_maximum_speed,
-            t.samples,
-            r.road_name,
-            r.road_category
-        FROM traffic_speed_15min t
-        JOIN road_segments r
-          ON t.link_id = r.link_id
-        """
-
-        df = pd.read_sql(query, engine)
-        df["interval_start"] = pd.to_datetime(df["interval_start"])
-
-        return df, None
 
 
 
@@ -430,45 +406,71 @@ def main() -> None:
         # ---------- DASHBOARD SECTION ----------
         st.markdown("## Traffic Data Insights")
 
-        history_df, _ = load_traffic_data("history")
+        history_df = load_history_data(days=7)
 
         if history_df.empty:
             st.info("No historical data available for EDA.")
-            return
+            st.stop()
 
-        # create derived feature
-        history_df["hour"] = history_df["interval_start"].dt.hour
+        # =========================
+        # Data cleaning (ONCE ONLY)
+        # =========================
+        history_df["collected_at"] = pd.to_datetime(history_df["collected_at"], utc=True)
 
-        # ---------- LAYOUT: 2 PANELS ----------
+        history_df["avg_speed"] = (
+            history_df["minimum_speed"].fillna(0)
+            + history_df["maximum_speed"].fillna(0)
+        ) / 2.0
+
+        history_df["hour"] = history_df["collected_at"].dt.hour
+
+        # =========================
+        # Layout
+        # =========================
         col1, col2 = st.columns(2, gap="large")
 
-        # ===== LEFT PANEL: Distribution =====
+        # =========================
+        # LEFT PANEL: Distribution
+        # =========================
         with col1:
             st.markdown("### Speed Distribution")
 
             fig1, ax1 = plt.subplots()
-            ax1.hist(history_df["avg_speed_band"].dropna(), bins=40)
-            ax1.set_xlabel("Speed Band")
+            ax1.hist(history_df["avg_speed"].dropna(), bins=40, range=(1, 150))
+            ax1.set_xlabel("Average Speed (km/h)")
             ax1.set_ylabel("Frequency")
-            ax1.set_facecolor("#0b1220")
+            ax1.grid(alpha=0.2)
+
             st.pyplot(fig1)
 
-        # ===== RIGHT PANEL: Time Pattern =====
+        # =========================
+        # RIGHT PANEL: Hourly Pattern
+        # =========================
         with col2:
             st.markdown("### Hourly Traffic Pattern")
 
-            hourly = history_df.groupby("hour")["avg_speed_band"].mean()
+            hourly = (
+                history_df
+                .groupby("hour")["avg_speed"]
+                .mean()
+                .sort_index()
+            )
 
-            fig2, ax2 = plt.subplots()
-            ax2.plot(hourly.index, hourly.values)
-            ax2.set_xlabel("Hour of Day")
-            ax2.set_ylabel("Avg Speed Band")
-            ax2.set_xticks(range(0, 24, 2))
-            ax2.grid(alpha=0.2)
+            if not hourly.empty:
+                fig2, ax2 = plt.subplots()
+                ax2.plot(hourly.index, hourly.values, marker="o")
+                ax2.set_xlabel("Hour of Day")
+                ax2.set_ylabel("Avg Speed (km/h)")
+                ax2.set_xticks(range(0, 24, 2))
+                ax2.grid(alpha=0.2)
 
-            st.pyplot(fig2)
+                st.pyplot(fig2)
+            else:
+                st.warning("No hourly pattern could be computed.")
 
-        # ---------- SUMMARY ROW ----------
+        # =========================
+        # SUMMARY ROW
+        # =========================
         st.markdown("### Dataset Summary")
 
         m1, m2, m3 = st.columns(3)
@@ -477,11 +479,10 @@ def main() -> None:
             st.metric("Total Records", len(history_df))
 
         with m2:
-            st.metric("Avg Speed", round(history_df["avg_speed_band"].mean(), 2))
+            st.metric("Avg Speed", round(history_df["avg_speed"].mean(), 2))
 
         with m3:
-            st.metric("Time Range", f"{history_df['interval_start'].nunique()} intervals")
-
+            st.metric("Time Points", history_df["collected_at"].nunique())
     except Exception as exc:
         st.markdown('<section class="section-wrap">', unsafe_allow_html=True)
         st.error(
