@@ -433,7 +433,7 @@ def main() -> None:
         # LEFT PANEL: Distribution
         # =========================
         with col1:
-            st.markdown("### Speed Distribution")
+            st.markdown("### Average Speed Distribution")
 
             fig1, ax1 = plt.subplots()
             ax1.hist(history_df["avg_speed"].dropna(), bins=40, range=(1, 150))
@@ -447,7 +447,7 @@ def main() -> None:
         # RIGHT PANEL: Hourly Pattern
         # =========================
         with col2:
-            st.markdown("### Hourly Traffic Pattern")
+            st.markdown("### Average Hourly Traffic Pattern")
 
             hourly = (
                 history_df
