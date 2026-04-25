@@ -2,6 +2,7 @@ from airflow import DAG
 from airflow.providers.standard.operators.python import PythonOperator
 from datetime import datetime, timedelta, timezone
 import logging
+import os
 import traceback
 
 from lta_common import (
@@ -13,6 +14,7 @@ from lta_common import (
 )
 
 logger = logging.getLogger(__name__)
+BATCH_SIZE = int(os.environ.get("SUPABASE_BATCH_SIZE", "100"))
 
 default_args = {
     "owner": "airflow",
@@ -44,11 +46,16 @@ def refresh_traffic_speed():
             logger.info("STEP 5: built cleaned snapshot dataframe rows=%s", len(snapshots_df))
 
             # latest table = latest known usable state
-            upsert_latest_snapshot_rows(conn, snapshots_df, batch_size=500)
+            upsert_latest_snapshot_rows(conn, snapshots_df, batch_size=BATCH_SIZE)
             total_rows_latest += len(snapshots_df)
 
             # recent table = raw cleaned history
-            insert_snapshot_rows(conn, "traffic_speed_recent", snapshots_df, batch_size=500)
+            insert_snapshot_rows(
+                conn,
+                "traffic_speed_recent",
+                snapshots_df,
+                batch_size=BATCH_SIZE,
+            )
             total_rows_recent += len(snapshots_df)
 
             total_pages += 1
