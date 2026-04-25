@@ -1,0 +1,176 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1900" height="1150" viewBox="0 0 1900 1150">
+  <defs>
+    <style>
+      .bg { fill: #fbfff4; }
+      .table { fill: #f2ffd6; stroke: #5f7f1f; stroke-width: 2.5; rx: 12; }
+      .view { fill: #fff8d9; stroke: #9a7a1f; stroke-width: 2.5; stroke-dasharray: 8 6; rx: 12; }
+      .header { fill: #cfe98b; stroke: #5f7f1f; stroke-width: 2.5; }
+      .viewHeader { fill: #f2dd83; stroke: #9a7a1f; stroke-width: 2.5; }
+      .rel { stroke: #42551d; stroke-width: 2.4; fill: none; marker-end: url(#arrow); }
+      .softRel { stroke: #8b6f1d; stroke-width: 2.4; fill: none; stroke-dasharray: 7 6; marker-end: url(#softArrow); }
+      .title { font-family: Arial, Helvetica, sans-serif; font-size: 24px; font-weight: bold; fill: #22300d; text-anchor: middle; dominant-baseline: middle; }
+      .field { font-family: Arial, Helvetica, sans-serif; font-size: 17px; fill: #22300d; }
+      .key { font-weight: bold; }
+      .label { font-family: Arial, Helvetica, sans-serif; font-size: 16px; font-weight: bold; fill: #22300d; text-anchor: middle; dominant-baseline: middle; }
+      .note { font-family: Arial, Helvetica, sans-serif; font-size: 15px; fill: #4d5f1f; }
+    </style>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M 0 0 L 12 6 L 0 12 z" fill="#42551d"/>
+    </marker>
+    <marker id="softArrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M 0 0 L 12 6 L 0 12 z" fill="#8b6f1d"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="1900" height="1150" class="bg"/>
+
+  <!-- road_segments -->
+  <rect x="70" y="365" width="300" height="250" class="table"/>
+  <rect x="70" y="365" width="300" height="50" class="header"/>
+  <text x="220" y="391" class="title">road_segments</text>
+  <text x="90" y="445" class="field key">PK link_id</text>
+  <text x="90" y="475" class="field">road_name</text>
+  <text x="90" y="505" class="field">road_category</text>
+  <text x="90" y="535" class="field">start_lat, start_lon</text>
+  <text x="90" y="565" class="field">end_lat, end_lon</text>
+  <text x="90" y="595" class="field">updated_at</text>
+
+  <!-- traffic_speed_latest -->
+  <rect x="515" y="80" width="310" height="170" class="table"/>
+  <rect x="515" y="80" width="310" height="50" class="header"/>
+  <text x="670" y="106" class="title">traffic_speed_latest</text>
+  <text x="535" y="160" class="field key">PK/FK link_id</text>
+  <text x="535" y="190" class="field">collected_at</text>
+  <text x="535" y="220" class="field">speed_band, min/max speed</text>
+
+  <!-- traffic_speed_recent -->
+  <rect x="515" y="325" width="310" height="190" class="table"/>
+  <rect x="515" y="325" width="310" height="50" class="header"/>
+  <text x="670" y="351" class="title">traffic_speed_recent</text>
+  <text x="535" y="405" class="field key">PK collected_at</text>
+  <text x="535" y="435" class="field key">PK/FK link_id</text>
+  <text x="535" y="465" class="field">speed_band</text>
+  <text x="535" y="495" class="field">minimum_speed, maximum_speed</text>
+
+  <!-- traffic_speed_15min -->
+  <rect x="515" y="595" width="310" height="200" class="table"/>
+  <rect x="515" y="595" width="310" height="50" class="header"/>
+  <text x="670" y="621" class="title">traffic_speed_15min</text>
+  <text x="535" y="675" class="field key">PK interval_start</text>
+  <text x="535" y="705" class="field key">PK/FK link_id</text>
+  <text x="535" y="735" class="field">avg/min/max speed_band</text>
+  <text x="535" y="765" class="field">avg_minimum/maximum_speed</text>
+
+  <!-- weather_stations -->
+  <rect x="970" y="80" width="310" height="200" class="table"/>
+  <rect x="970" y="80" width="310" height="50" class="header"/>
+  <text x="1125" y="106" class="title">weather_stations</text>
+  <text x="990" y="160" class="field key">PK station_id</text>
+  <text x="990" y="190" class="field">device_id</text>
+  <text x="990" y="220" class="field">station_name</text>
+  <text x="990" y="250" class="field">latitude, longitude</text>
+
+  <!-- rainfall_readings -->
+  <rect x="1470" y="80" width="340" height="200" class="table"/>
+  <rect x="1470" y="80" width="340" height="50" class="header"/>
+  <text x="1640" y="106" class="title">rainfall_readings</text>
+  <text x="1490" y="160" class="field key">PK reading_timestamp</text>
+  <text x="1490" y="190" class="field key">PK/FK station_id</text>
+  <text x="1490" y="220" class="field">rainfall_mm</text>
+  <text x="1490" y="250" class="field">inserted_at</text>
+
+  <!-- road_segment_weather_station -->
+  <rect x="970" y="365" width="350" height="180" class="table"/>
+  <rect x="970" y="365" width="350" height="50" class="header"/>
+  <text x="1145" y="391" class="title">road_segment_weather_station</text>
+  <text x="990" y="445" class="field key">PK/FK link_id</text>
+  <text x="990" y="475" class="field">FK station_id</text>
+  <text x="990" y="505" class="field">distance_km</text>
+  <text x="990" y="535" class="field">updated_at</text>
+
+  <!-- traffic_rainfall view -->
+  <rect x="970" y="655" width="350" height="210" class="view"/>
+  <rect x="970" y="655" width="350" height="50" class="viewHeader"/>
+  <text x="1145" y="681" class="title">traffic_rainfall_* views</text>
+  <text x="990" y="735" class="field">traffic_rainfall_latest</text>
+  <text x="990" y="765" class="field">traffic_rainfall_recent</text>
+  <text x="990" y="795" class="field">joins traffic + road + rainfall</text>
+  <text x="990" y="825" class="field">nearest rainfall reading +/- 10 min</text>
+
+  <!-- training data -->
+  <rect x="1470" y="590" width="340" height="230" class="table"/>
+  <rect x="1470" y="590" width="340" height="50" class="header"/>
+  <text x="1640" y="616" class="title">traffic_rainfall_training_data</text>
+  <text x="1490" y="670" class="field key">PK collected_at</text>
+  <text x="1490" y="700" class="field key">PK link_id</text>
+  <text x="1490" y="730" class="field">traffic features</text>
+  <text x="1490" y="760" class="field">rainfall features</text>
+  <text x="1490" y="790" class="field">congestion_score</text>
+
+  <!-- model registry -->
+  <rect x="970" y="930" width="350" height="180" class="table"/>
+  <rect x="970" y="930" width="350" height="50" class="header"/>
+  <text x="1145" y="956" class="title">congestion_model_registry</text>
+  <text x="990" y="1010" class="field key">PK model_id</text>
+  <text x="990" y="1040" class="field">model_name, model_version</text>
+  <text x="990" y="1070" class="field">metrics + artifact + is_active</text>
+
+  <!-- predictions -->
+  <rect x="1470" y="910" width="340" height="210" class="table"/>
+  <rect x="1470" y="910" width="340" height="50" class="header"/>
+  <text x="1640" y="936" class="title">congestion_predictions</text>
+  <text x="1490" y="990" class="field key">PK target_time</text>
+  <text x="1490" y="1020" class="field key">PK link_id</text>
+  <text x="1490" y="1050" class="field key">PK/FK model_id</text>
+  <text x="1490" y="1080" class="field">predicted_congestion_score</text>
+
+  <!-- Strong FK relationships -->
+  <path d="M 370 405 C 430 300, 450 170, 515 165" class="rel"/>
+  <text x="420" y="285" class="label">1 to 0..1</text>
+
+  <path d="M 370 455 C 420 435, 460 425, 515 420" class="rel"/>
+  <text x="430" y="420" class="label">1 to M</text>
+
+  <path d="M 370 560 C 440 650, 465 690, 515 695" class="rel"/>
+  <text x="430" y="640" class="label">1 to M</text>
+
+  <path d="M 370 490 C 610 470, 770 455, 970 455" class="rel"/>
+  <text x="650" y="438" class="label">1 to 0..1</text>
+
+  <path d="M 1280 180 C 1360 180, 1400 180, 1470 180" class="rel"/>
+  <text x="1375" y="160" class="label">1 to M</text>
+
+  <path d="M 1125 280 C 1125 315, 1125 335, 1125 365" class="rel"/>
+  <text x="1160" y="323" class="label">1 to M</text>
+
+  <path d="M 1320 1020 C 1385 1020, 1415 1020, 1470 1020" class="rel"/>
+  <text x="1395" y="1000" class="label">1 to M</text>
+
+  <!-- Data pipeline/view dependencies -->
+  <path d="M 825 165 C 895 250, 915 610, 970 710" class="softRel"/>
+  <text x="900" y="530" class="label">feeds</text>
+
+  <path d="M 825 420 C 900 485, 920 620, 970 735" class="softRel"/>
+  <text x="900" y="610" class="label">feeds</text>
+
+  <path d="M 1145 545 C 1145 585, 1145 620, 1145 655" class="softRel"/>
+  <text x="1185" y="600" class="label">joins</text>
+
+  <path d="M 1470 235 C 1380 360, 1280 535, 1210 655" class="softRel"/>
+  <text x="1375" y="470" class="label">joins</text>
+
+  <path d="M 1320 735 C 1385 715, 1415 705, 1470 705" class="softRel"/>
+  <text x="1395" y="685" class="label">collects</text>
+
+  <path d="M 1470 775 C 1390 860, 1325 935, 1245 930" class="softRel"/>
+  <text x="1370" y="870" class="label">trains</text>
+
+  <path d="M 1640 820 C 1640 850, 1640 880, 1640 910" class="softRel"/>
+  <text x="1680" y="865" class="label">predicts from</text>
+
+  <!-- Legend -->
+  <rect x="70" y="40" width="330" height="130" fill="#f3ffd7" stroke="#9ab45b" stroke-width="2" rx="10"/>
+  <text x="90" y="75" class="note">Solid line = physical FK/table relationship</text>
+  <text x="90" y="105" class="note">Dashed line = view/pipeline dependency</text>
+  <text x="90" y="135" class="note">PK/FK labels show key columns</text>
+</svg>

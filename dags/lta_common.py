@@ -1,6 +1,7 @@
 import os
 import math
 import logging
+import time
 from datetime import datetime, timezone
 
 import pandas as pd
@@ -14,6 +15,11 @@ API_URL = "https://datamall2.mytransport.sg/ltaodataservice/v4/TrafficSpeedBands
 
 LTA_ACCOUNT_KEY = os.environ["LTA_ACCOUNT_KEY"]
 SUPABASE_DB_URI = os.environ["SUPABASE_DB_URI"]
+SUPABASE_CONNECT_TIMEOUT_SECONDS = int(os.environ.get("SUPABASE_CONNECT_TIMEOUT_SECONDS", "20"))
+SUPABASE_CONNECT_RETRIES = int(os.environ.get("SUPABASE_CONNECT_RETRIES", "3"))
+SUPABASE_CONNECT_RETRY_DELAY_SECONDS = float(
+    os.environ.get("SUPABASE_CONNECT_RETRY_DELAY_SECONDS", "5")
+)
 
 
 def get_db_dsn() -> str:
@@ -23,7 +29,29 @@ def get_db_dsn() -> str:
 
 
 def get_connection():
-    return psycopg2.connect(get_db_dsn())
+    last_error = None
+
+    for attempt in range(1, SUPABASE_CONNECT_RETRIES + 1):
+        try:
+            return psycopg2.connect(
+                get_db_dsn(),
+                connect_timeout=SUPABASE_CONNECT_TIMEOUT_SECONDS,
+            )
+        except psycopg2.OperationalError as exc:
+            last_error = exc
+            if attempt == SUPABASE_CONNECT_RETRIES:
+                break
+
+            delay_seconds = SUPABASE_CONNECT_RETRY_DELAY_SECONDS * attempt
+            logger.warning(
+                "Supabase connection attempt %s/%s failed; retrying in %.1fs",
+                attempt,
+                SUPABASE_CONNECT_RETRIES,
+                delay_seconds,
+            )
+            time.sleep(delay_seconds)
+
+    raise last_error
 
 
 def fetch_speed_bands_page(skip: int, page_size: int = 500) -> pd.DataFrame:
