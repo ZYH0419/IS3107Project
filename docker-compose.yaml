@@ -1,5 +1,8 @@
 x-airflow-common: &airflow-common
-  image: apache/airflow:3.1.7
+  build:
+    context: .
+    dockerfile: Dockerfile.airflow
+  image: smartcity-airflow:3.1.7
   env_file:
     - .env
   environment: &airflow-common-env
@@ -12,12 +15,47 @@ x-airflow-common: &airflow-common
     AIRFLOW__CORE__EXECUTION_API_SERVER_URL: "http://airflow-apiserver:8080/execution/"
     AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: "true"
     AIRFLOW_CONFIG: "/opt/airflow/config/airflow.cfg"
+
+    LTA_ACCOUNT_KEY: ${LTA_ACCOUNT_KEY}
+    SUPABASE_DB_URI: ${SUPABASE_DB_URI}
+
+    RAW_DATA_DIR: ${RAW_DATA_DIR:-/opt/airflow/raw_data}
+
+    R2_ENDPOINT: ${R2_ENDPOINT}
+    R2_ACCESS_KEY: ${R2_ACCESS_KEY}
+    R2_SECRET_KEY: ${R2_SECRET_KEY}
+    R2_BUCKET: ${R2_BUCKET}
+
+    R2_RAW_PREFIX: ${R2_RAW_PREFIX:-traffic_speed/}
+    R2_CLEANED_PREFIX: ${R2_CLEANED_PREFIX:-traffic_speed_cleaned/}
+    R2_FEATURES_PREFIX: ${R2_FEATURES_PREFIX:-features/training_data/}
+
+    R2_RAINFALL_READINGS_PREFIX: ${R2_RAINFALL_READINGS_PREFIX:-rainfall_readings/}
+    R2_WEATHER_STATIONS_PREFIX: ${R2_WEATHER_STATIONS_PREFIX:-weather_stations/}
+    R2_TAXI_PREFIX: ${R2_TAXI_PREFIX:-taxi_availability/}
+    R2_INCIDENTS_PREFIX: ${R2_INCIDENTS_PREFIX:-traffic_incidents/}
+    R2_POI_PREFIX: ${R2_POI_PREFIX:-poi/}
+    R2_WEATHER_EVENTS_PREFIX: ${R2_WEATHER_EVENTS_PREFIX:-weather_events/}
+
+    WRITE_LATEST_RAINFALL_ALIAS: ${WRITE_LATEST_RAINFALL_ALIAS:-true}
+    WRITE_LATEST_TAXI_ALIAS: ${WRITE_LATEST_TAXI_ALIAS:-true}
+    WRITE_LATEST_INCIDENTS_ALIAS: ${WRITE_LATEST_INCIDENTS_ALIAS:-true}
+    WRITE_LATEST_POI_ALIAS: ${WRITE_LATEST_POI_ALIAS:-true}
+    WRITE_LATEST_WEATHER_EVENTS_ALIAS: ${WRITE_LATEST_WEATHER_EVENTS_ALIAS:-true}
+    WRITE_LATEST_FEATURE_ALIAS: ${WRITE_LATEST_FEATURE_ALIAS:-true}
+
+    RAINFALL_REMAP_ALL: ${RAINFALL_REMAP_ALL:-false}
+    RECENT_RETENTION_HOURS: ${RECENT_RETENTION_HOURS:-24}
+    PRIMARY_WINDOW_DAYS: ${PRIMARY_WINDOW_DAYS:-3}
+    ROAD_NEIGHBOR_COORD_DECIMALS: ${ROAD_NEIGHBOR_COORD_DECIMALS:-5}
+
+    POI_PLACE_QUERY: ${POI_PLACE_QUERY:-Singapore}
+
   volumes:
     - ./dags:/opt/airflow/dags
     - ./logs:/opt/airflow/logs
     - ./config:/opt/airflow/config
     - ./plugins:/opt/airflow/plugins
-    - ./requirements-airflow.txt:/requirements-airflow.txt
     - ./raw_data:/opt/airflow/raw_data
   user: "${AIRFLOW_UID:-50000}:0"
   depends_on: &airflow-common-depends-on
@@ -42,11 +80,28 @@ services:
       retries: 5
       start_period: 5s
 
+  airflow-init:
+    <<: *airflow-common
+    container_name: airflow_init
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        mkdir -p /opt/airflow/logs /opt/airflow/dags /opt/airflow/plugins /opt/airflow/config /opt/airflow/raw_data
+        chown -R "${AIRFLOW_UID:-50000}:0" /opt/airflow/logs /opt/airflow/dags /opt/airflow/plugins /opt/airflow/config /opt/airflow/raw_data
+        /entrypoint airflow db migrate
+    environment:
+      <<: *airflow-common-env
+      _AIRFLOW_DB_MIGRATE: "true"
+      _AIRFLOW_WWW_USER_CREATE: "true"
+      _AIRFLOW_WWW_USER_USERNAME: "${_AIRFLOW_WWW_USER_USERNAME:-airflow}"
+      _AIRFLOW_WWW_USER_PASSWORD: "${_AIRFLOW_WWW_USER_PASSWORD:-airflow}"
+    user: "0:0"
+
   airflow-apiserver:
     <<: *airflow-common
     container_name: airflow_apiserver
-    command: >
-      bash -c "pip install -r /requirements-airflow.txt && exec airflow api-server"
+    command: api-server
     ports:
       - "8080:8080"
     healthcheck:
@@ -64,14 +119,13 @@ services:
   airflow-scheduler:
     <<: *airflow-common
     container_name: airflow_scheduler
-    command: >
-      bash -c "pip install -r /requirements-airflow.txt && exec airflow scheduler"
+    command: scheduler
     healthcheck:
-      test: ["CMD", "curl", "--fail", "http://localhost:8974/health"]
+      test: ["CMD-SHELL", "airflow jobs check --job-type SchedulerJob --hostname \"$${HOSTNAME}\""]
       interval: 30s
       timeout: 10s
       retries: 5
-      start_period: 30s
+      start_period: 60s
     restart: always
     depends_on:
       <<: *airflow-common-depends-on
@@ -81,14 +135,13 @@ services:
   airflow-dag-processor:
     <<: *airflow-common
     container_name: airflow_dag_processor
-    command: >
-      bash -c "pip install -r /requirements-airflow.txt && exec airflow dag-processor"
+    command: dag-processor
     healthcheck:
-      test: ["CMD-SHELL", 'airflow jobs check --job-type DagProcessorJob --hostname "$${HOSTNAME}"']
+      test: ["CMD-SHELL", "airflow jobs check --job-type DagProcessorJob --hostname \"$${HOSTNAME}\""]
       interval: 30s
       timeout: 10s
       retries: 5
-      start_period: 30s
+      start_period: 60s
     restart: always
     depends_on:
       <<: *airflow-common-depends-on
@@ -98,37 +151,18 @@ services:
   airflow-triggerer:
     <<: *airflow-common
     container_name: airflow_triggerer
-    command: >
-      bash -c "pip install -r /requirements-airflow.txt && exec airflow triggerer"
+    command: triggerer
     healthcheck:
-      test: ["CMD-SHELL", 'airflow jobs check --job-type TriggererJob --hostname "$${HOSTNAME}"']
+      test: ["CMD-SHELL", "airflow jobs check --job-type TriggererJob --hostname \"$${HOSTNAME}\""]
       interval: 30s
       timeout: 10s
       retries: 5
-      start_period: 30s
+      start_period: 60s
     restart: always
     depends_on:
       <<: *airflow-common-depends-on
       airflow-init:
         condition: service_completed_successfully
-
-  airflow-init:
-    <<: *airflow-common
-    container_name: airflow_init
-    entrypoint: /bin/bash
-    command:
-      - -c
-      - |
-        mkdir -p /opt/airflow/logs /opt/airflow/dags /opt/airflow/plugins /opt/airflow/config
-        pip install -r /requirements-airflow.txt
-        /entrypoint airflow db migrate
-    environment:
-      <<: *airflow-common-env
-      _AIRFLOW_DB_MIGRATE: "true"
-      _AIRFLOW_WWW_USER_CREATE: "true"
-      _AIRFLOW_WWW_USER_USERNAME: "${_AIRFLOW_WWW_USER_USERNAME:-airflow}"
-      _AIRFLOW_WWW_USER_PASSWORD: "${_AIRFLOW_WWW_USER_PASSWORD:-airflow}"
-    user: "0:0"
 
   streamlit:
     image: python:3.10-slim

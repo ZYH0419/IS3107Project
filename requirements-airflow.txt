@@ -6,3 +6,16 @@ python-dotenv
 sqlalchemy
 python-dateutil
 scikit-learn
+s3fs
+pyarrow
+
+duckdb
+boto3
+joblib
+plotly
+xgboost
+osmnx
+geopandas
+shapely
+pyproj
+fiona

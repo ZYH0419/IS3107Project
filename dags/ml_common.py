@@ -19,8 +19,12 @@ FEATURE_COLUMNS = [
     "minimum_speed",
     "maximum_speed",
     "avg_speed",
+
     "rainfall_mm",
-    "station_distance_km",
+    "taxi_count",
+    "poi_density",
+    "traffic_incident_count",
+
     "hour_of_day",
     "day_of_week",
     "is_weekend",
@@ -49,16 +53,70 @@ def ensure_ml_schema(conn) -> None:
                 avg_speed double precision,
                 congestion_score double precision,
                 rainfall_mm double precision,
+                taxi_count double precision DEFAULT 0,
+                poi_density double precision DEFAULT 0,
+                traffic_incident_count double precision DEFAULT 0,
                 station_id text,
                 station_name text,
                 station_distance_km double precision,
                 rainfall_timestamp timestamptz,
+                context_feature_timestamp timestamptz,
                 hour_of_day integer,
                 day_of_week integer,
                 is_weekend boolean,
                 inserted_at timestamptz NOT NULL DEFAULT now(),
                 PRIMARY KEY (collected_at, link_id)
             )
+            """
+        )
+
+        # Safe migrations for databases where this table was created by the older version.
+        cur.execute(
+            """
+            ALTER TABLE traffic_rainfall_training_data
+            ADD COLUMN IF NOT EXISTS taxi_count double precision DEFAULT 0
+            """
+        )
+        cur.execute(
+            """
+            ALTER TABLE traffic_rainfall_training_data
+            ADD COLUMN IF NOT EXISTS poi_density double precision DEFAULT 0
+            """
+        )
+        cur.execute(
+            """
+            ALTER TABLE traffic_rainfall_training_data
+            ADD COLUMN IF NOT EXISTS traffic_incident_count double precision DEFAULT 0
+            """
+        )
+        cur.execute(
+            """
+            ALTER TABLE traffic_rainfall_training_data
+            ADD COLUMN IF NOT EXISTS context_feature_timestamp timestamptz
+            """
+        )
+
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS traffic_context_features (
+                feature_timestamp timestamptz NOT NULL,
+                link_id bigint NOT NULL,
+                taxi_count double precision DEFAULT 0,
+                poi_density double precision DEFAULT 0,
+                traffic_incident_count double precision DEFAULT 0,
+                source_taxi_timestamp timestamptz,
+                source_poi_timestamp timestamptz,
+                source_incident_timestamp timestamptz,
+                inserted_at timestamptz NOT NULL DEFAULT now(),
+                PRIMARY KEY (feature_timestamp, link_id)
+            )
+            """
+        )
+
+        cur.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_context_features_link_time
+            ON traffic_context_features (link_id, feature_timestamp DESC)
             """
         )
 
@@ -109,6 +167,9 @@ def ensure_ml_schema(conn) -> None:
                 current_speed_band integer,
                 current_congestion_score double precision,
                 rainfall_mm double precision,
+                taxi_count double precision DEFAULT 0,
+                poi_density double precision DEFAULT 0,
+                traffic_incident_count double precision DEFAULT 0,
                 predicted_congestion_score double precision,
                 predicted_speed_band double precision,
                 model_id bigint REFERENCES congestion_model_registry(model_id),
@@ -120,12 +181,32 @@ def ensure_ml_schema(conn) -> None:
 
         cur.execute(
             """
+            ALTER TABLE congestion_predictions
+            ADD COLUMN IF NOT EXISTS taxi_count double precision DEFAULT 0
+            """
+        )
+        cur.execute(
+            """
+            ALTER TABLE congestion_predictions
+            ADD COLUMN IF NOT EXISTS poi_density double precision DEFAULT 0
+            """
+        )
+        cur.execute(
+            """
+            ALTER TABLE congestion_predictions
+            ADD COLUMN IF NOT EXISTS traffic_incident_count double precision DEFAULT 0
+            """
+        )
+
+        cur.execute(
+            """
             CREATE INDEX IF NOT EXISTS idx_congestion_predictions_created
             ON congestion_predictions (prediction_created_at DESC)
             """
         )
 
     conn.commit()
+
 
 
 def collect_training_snapshot(conn) -> int:
@@ -145,34 +226,55 @@ def collect_training_snapshot(conn) -> int:
                 avg_speed,
                 congestion_score,
                 rainfall_mm,
+                taxi_count,
+                poi_density,
+                traffic_incident_count,
                 station_id,
                 station_name,
                 station_distance_km,
                 rainfall_timestamp,
+                context_feature_timestamp,
                 hour_of_day,
                 day_of_week,
                 is_weekend
             )
             SELECT
-                collected_at,
-                link_id,
-                road_name,
-                road_category,
-                speed_band,
-                minimum_speed,
-                maximum_speed,
-                (minimum_speed + maximum_speed) / 2.0 AS avg_speed,
-                9 - speed_band AS congestion_score,
-                rainfall_mm,
-                station_id,
-                station_name,
-                station_distance_km,
-                rainfall_timestamp,
-                EXTRACT(HOUR FROM collected_at)::integer AS hour_of_day,
-                EXTRACT(DOW FROM collected_at)::integer AS day_of_week,
-                EXTRACT(DOW FROM collected_at)::integer IN (0, 6) AS is_weekend
-            FROM traffic_rainfall_latest
-            WHERE speed_band IS NOT NULL
+                trl.collected_at,
+                trl.link_id,
+                trl.road_name,
+                trl.road_category,
+                trl.speed_band,
+                trl.minimum_speed,
+                trl.maximum_speed,
+                (trl.minimum_speed + trl.maximum_speed) / 2.0 AS avg_speed,
+                9 - trl.speed_band AS congestion_score,
+                COALESCE(trl.rainfall_mm, 0) AS rainfall_mm,
+                COALESCE(context.taxi_count, 0) AS taxi_count,
+                COALESCE(context.poi_density, 0) AS poi_density,
+                COALESCE(context.traffic_incident_count, 0) AS traffic_incident_count,
+                trl.station_id,
+                trl.station_name,
+                trl.station_distance_km,
+                trl.rainfall_timestamp,
+                context.feature_timestamp AS context_feature_timestamp,
+                EXTRACT(HOUR FROM trl.collected_at)::integer AS hour_of_day,
+                EXTRACT(DOW FROM trl.collected_at)::integer AS day_of_week,
+                EXTRACT(DOW FROM trl.collected_at)::integer IN (0, 6) AS is_weekend
+            FROM traffic_rainfall_latest AS trl
+            LEFT JOIN LATERAL (
+                SELECT
+                    feature_timestamp,
+                    taxi_count,
+                    poi_density,
+                    traffic_incident_count
+                FROM traffic_context_features AS tcf
+                WHERE tcf.link_id = trl.link_id
+                  AND tcf.feature_timestamp >= trl.collected_at - interval '10 minutes'
+                  AND tcf.feature_timestamp <= trl.collected_at + interval '10 minutes'
+                ORDER BY ABS(EXTRACT(EPOCH FROM (tcf.feature_timestamp - trl.collected_at)))
+                LIMIT 1
+            ) AS context ON TRUE
+            WHERE trl.speed_band IS NOT NULL
             ON CONFLICT (collected_at, link_id) DO UPDATE SET
                 road_name = EXCLUDED.road_name,
                 road_category = EXCLUDED.road_category,
@@ -182,10 +284,14 @@ def collect_training_snapshot(conn) -> int:
                 avg_speed = EXCLUDED.avg_speed,
                 congestion_score = EXCLUDED.congestion_score,
                 rainfall_mm = EXCLUDED.rainfall_mm,
+                taxi_count = EXCLUDED.taxi_count,
+                poi_density = EXCLUDED.poi_density,
+                traffic_incident_count = EXCLUDED.traffic_incident_count,
                 station_id = EXCLUDED.station_id,
                 station_name = EXCLUDED.station_name,
                 station_distance_km = EXCLUDED.station_distance_km,
                 rainfall_timestamp = EXCLUDED.rainfall_timestamp,
+                context_feature_timestamp = EXCLUDED.context_feature_timestamp,
                 hour_of_day = EXCLUDED.hour_of_day,
                 day_of_week = EXCLUDED.day_of_week,
                 is_weekend = EXCLUDED.is_weekend,
@@ -196,6 +302,7 @@ def collect_training_snapshot(conn) -> int:
 
     conn.commit()
     return affected_rows
+
 
 
 def load_training_frame(
@@ -224,6 +331,9 @@ def load_training_frame(
                 avg_speed,
                 congestion_score,
                 rainfall_mm,
+                taxi_count,
+                poi_density,
+                traffic_incident_count,
                 station_distance_km,
                 hour_of_day,
                 day_of_week,
@@ -244,6 +354,9 @@ def load_training_frame(
                 current.avg_speed,
                 current.congestion_score AS current_congestion_score,
                 COALESCE(current.rainfall_mm, 0) AS rainfall_mm,
+                COALESCE(current.taxi_count, 0) AS taxi_count,
+                COALESCE(current.poi_density, 0) AS poi_density,
+                COALESCE(current.traffic_incident_count, 0) AS traffic_incident_count,
                 COALESCE(current.station_distance_km, 0) AS station_distance_km,
                 current.hour_of_day,
                 current.day_of_week,
@@ -275,6 +388,7 @@ def load_training_frame(
         columns = [desc[0] for desc in cur.description]
 
     return pd.DataFrame(rows, columns=columns)
+
 
 
 def prepare_features(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series]:
@@ -477,24 +591,42 @@ def load_active_model(conn) -> dict[str, Any]:
 
 
 def load_latest_prediction_frame(conn) -> pd.DataFrame:
+    ensure_ml_schema(conn)
+
     query = """
         SELECT
-            collected_at,
-            link_id,
-            road_name,
-            road_category,
-            speed_band AS current_speed_band,
-            minimum_speed,
-            maximum_speed,
-            (minimum_speed + maximum_speed) / 2.0 AS avg_speed,
-            9 - speed_band AS current_congestion_score,
-            COALESCE(rainfall_mm, 0) AS rainfall_mm,
-            COALESCE(station_distance_km, 0) AS station_distance_km,
-            EXTRACT(HOUR FROM collected_at)::integer AS hour_of_day,
-            EXTRACT(DOW FROM collected_at)::integer AS day_of_week,
-            EXTRACT(DOW FROM collected_at)::integer IN (0, 6) AS is_weekend
-        FROM traffic_rainfall_latest
-        WHERE speed_band IS NOT NULL
+            trl.collected_at,
+            trl.link_id,
+            trl.road_name,
+            trl.road_category,
+            trl.speed_band AS current_speed_band,
+            trl.minimum_speed,
+            trl.maximum_speed,
+            (trl.minimum_speed + trl.maximum_speed) / 2.0 AS avg_speed,
+            9 - trl.speed_band AS current_congestion_score,
+            COALESCE(trl.rainfall_mm, 0) AS rainfall_mm,
+            COALESCE(context.taxi_count, 0) AS taxi_count,
+            COALESCE(context.poi_density, 0) AS poi_density,
+            COALESCE(context.traffic_incident_count, 0) AS traffic_incident_count,
+            COALESCE(trl.station_distance_km, 0) AS station_distance_km,
+            EXTRACT(HOUR FROM trl.collected_at)::integer AS hour_of_day,
+            EXTRACT(DOW FROM trl.collected_at)::integer AS day_of_week,
+            EXTRACT(DOW FROM trl.collected_at)::integer IN (0, 6) AS is_weekend
+        FROM traffic_rainfall_latest AS trl
+        LEFT JOIN LATERAL (
+            SELECT
+                feature_timestamp,
+                taxi_count,
+                poi_density,
+                traffic_incident_count
+            FROM traffic_context_features AS tcf
+            WHERE tcf.link_id = trl.link_id
+              AND tcf.feature_timestamp >= trl.collected_at - interval '10 minutes'
+              AND tcf.feature_timestamp <= trl.collected_at + interval '10 minutes'
+            ORDER BY ABS(EXTRACT(EPOCH FROM (tcf.feature_timestamp - trl.collected_at)))
+            LIMIT 1
+        ) AS context ON TRUE
+        WHERE trl.speed_band IS NOT NULL
     """
 
     with conn.cursor() as cur:
@@ -505,9 +637,12 @@ def load_latest_prediction_frame(conn) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=columns)
 
 
+
 def save_predictions(conn, prediction_df: pd.DataFrame, model_id: int, model_name: str, lookahead_minutes: int = 15) -> int:
     if prediction_df.empty:
         return 0
+
+    ensure_ml_schema(conn)
 
     prediction_created_at = datetime.now(timezone.utc)
     rows = []
@@ -525,6 +660,9 @@ def save_predictions(conn, prediction_df: pd.DataFrame, model_id: int, model_nam
                 int(row.current_speed_band) if pd.notna(row.current_speed_band) else None,
                 float(row.current_congestion_score) if pd.notna(row.current_congestion_score) else None,
                 float(row.rainfall_mm) if pd.notna(row.rainfall_mm) else None,
+                float(row.taxi_count) if hasattr(row, "taxi_count") and pd.notna(row.taxi_count) else 0.0,
+                float(row.poi_density) if hasattr(row, "poi_density") and pd.notna(row.poi_density) else 0.0,
+                float(row.traffic_incident_count) if hasattr(row, "traffic_incident_count") and pd.notna(row.traffic_incident_count) else 0.0,
                 predicted_congestion,
                 predicted_speed_band,
                 int(model_id),
@@ -542,6 +680,9 @@ def save_predictions(conn, prediction_df: pd.DataFrame, model_id: int, model_nam
             current_speed_band,
             current_congestion_score,
             rainfall_mm,
+            taxi_count,
+            poi_density,
+            traffic_incident_count,
             predicted_congestion_score,
             predicted_speed_band,
             model_id,
@@ -555,6 +696,9 @@ def save_predictions(conn, prediction_df: pd.DataFrame, model_id: int, model_nam
             current_speed_band = EXCLUDED.current_speed_band,
             current_congestion_score = EXCLUDED.current_congestion_score,
             rainfall_mm = EXCLUDED.rainfall_mm,
+            taxi_count = EXCLUDED.taxi_count,
+            poi_density = EXCLUDED.poi_density,
+            traffic_incident_count = EXCLUDED.traffic_incident_count,
             predicted_congestion_score = EXCLUDED.predicted_congestion_score,
             predicted_speed_band = EXCLUDED.predicted_speed_band,
             model_name = EXCLUDED.model_name
@@ -565,3 +709,5 @@ def save_predictions(conn, prediction_df: pd.DataFrame, model_id: int, model_nam
 
     conn.commit()
     return len(rows)
+
+

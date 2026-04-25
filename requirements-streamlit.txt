@@ -11,3 +11,6 @@ geopandas
 shapely
 osmnx
 scikit-learn
+
+s3fs
+pyarrow
