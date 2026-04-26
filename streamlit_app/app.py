@@ -103,8 +103,8 @@ def inject_css() -> None:
         }
 
         .section-wrap {
-            min-height: 100vh;
-            padding: 2rem 2rem 3rem 2rem;
+            margin: 0;
+            padding: 1.25rem 2rem 1.5rem 2rem;
             background: #0b1220;
         }
 
@@ -413,7 +413,13 @@ def load_prediction_dashboard_data() -> dict[str, pd.DataFrame]:
             test_rows,
             mae,
             rmse,
-            r2
+            r2,
+            accuracy,
+            precision,
+            recall,
+            f1,
+            roc_auc,
+            classification_threshold
         FROM congestion_model_registry
         WHERE is_active = true
         ORDER BY training_finished_at DESC
@@ -871,6 +877,12 @@ def render_prediction_section() -> None:
         else "N/A"
     )
 
+    def _optional_metric(value, digits: int = 4) -> str:
+        numeric_value = pd.to_numeric(value, errors="coerce")
+        if pd.isna(numeric_value):
+            return "N/A"
+        return f"{float(numeric_value):.{digits}f}"
+
     metric_cols = st.columns(6)
     with metric_cols[0]:
         _metric_card("Active model", str(model["model_name"]))
@@ -888,6 +900,7 @@ def render_prediction_section() -> None:
     st.caption(
         f"Latest batch created at {prediction_created_label}. Model trained at {model_trained_label}. "
         f"MAE {float(model['mae']):.4f}, RMSE {float(model['rmse']):.4f}, "
+        f"F1 {_optional_metric(model['f1'])}, Recall {_optional_metric(model['recall'])}, ROC AUC {_optional_metric(model['roc_auc'])}, "
         f"rows {int(model['train_rows'] or 0):,}/{int(model['test_rows'] or 0):,} train/test."
     )
 
@@ -1011,7 +1024,7 @@ def render_prediction_map_section(
     prediction_created_at: Optional[pd.Timestamp],
     target_time: Optional[pd.Timestamp],
 ) -> None:
-    st.markdown('<section class="section-wrap">', unsafe_allow_html=True)
+
 
     left, right = st.columns([5.5, 1.2], gap="large")
 
@@ -1175,7 +1188,7 @@ def render_prediction_map_section(
 
 
 def render_map_section(df: pd.DataFrame, latest_ts: Optional[pd.Timestamp]) -> None:
-    st.markdown('<section class="section-wrap">', unsafe_allow_html=True)
+    
 
     left, right = st.columns([5.5, 1.2], gap="large")
 
@@ -1332,26 +1345,25 @@ def main() -> None:
     render_hero()
     render_data_analysis_section()
     render_rainfall_impact_section()
+
+    try:
+        df, latest_ts = load_latest_snapshot()
+        render_map_section(df, latest_ts)
+    except Exception as exc:
+        st.error(
+            "Could not load data from Supabase. Check your secrets, environment variables, and whether the tables traffic_speed_latest and road_segments exist with the expected columns."
+        )
+        st.exception(exc)
+        st.markdown("</section>", unsafe_allow_html=True)
+
     render_prediction_section()
 
     try:
         prediction_map_df, prediction_created_at, prediction_target_time = load_latest_prediction_map()
         render_prediction_map_section(prediction_map_df, prediction_created_at, prediction_target_time)
     except Exception as exc:
-        st.markdown('<section class="section-wrap">', unsafe_allow_html=True)
         st.error(
             "Could not load prediction map data from Supabase. Check whether congestion_predictions and road_segments exist with the expected columns."
-        )
-        st.exception(exc)
-        st.markdown("</section>", unsafe_allow_html=True)
-
-    try:
-        df, latest_ts = load_latest_snapshot()
-        render_map_section(df, latest_ts)
-    except Exception as exc:
-        st.markdown('<section class="section-wrap">', unsafe_allow_html=True)
-        st.error(
-            "Could not load data from Supabase. Check your secrets, environment variables, and whether the tables traffic_speed_latest and road_segments exist with the expected columns."
         )
         st.exception(exc)
         st.markdown("</section>", unsafe_allow_html=True)
