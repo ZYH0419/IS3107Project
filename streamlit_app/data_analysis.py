@@ -288,49 +288,24 @@ def _apply_filters(df: pd.DataFrame, schema: dict[str, Optional[str]]) -> pd.Dat
     filtered = df.copy()
 
     st.markdown("#### Filters")
-    filter_cols = st.columns(4)
-
-    if "analysis_date" in filtered.columns and filtered["analysis_date"].notna().any():
-        min_date = filtered["analysis_date"].min()
-        max_date = filtered["analysis_date"].max()
-        selected_dates = filter_cols[0].date_input(
-            "Date range",
-            value=(min_date, max_date),
-            min_value=min_date,
-            max_value=max_date,
-        )
-        if isinstance(selected_dates, tuple) and len(selected_dates) == 2:
-            start_date, end_date = selected_dates
-            filtered = filtered[
-                filtered["analysis_date"].between(start_date, end_date)
-            ]
-    else:
-        filter_cols[0].caption("Date filter unavailable for this workbook.")
-
-    if schema["region"] and schema["region"] in filtered.columns:
-        region_options = sorted(filtered[schema["region"]].dropna().astype(str).unique())
-        selected_regions = filter_cols[1].multiselect("Region", options=region_options)
-        if selected_regions:
-            filtered = filtered[filtered[schema["region"]].isin(selected_regions)]
-    else:
-        filter_cols[1].caption("Region filter unavailable.")
+    filter_cols = st.columns(2)
 
     if schema["road_category"] and schema["road_category"] in filtered.columns:
         category_options = sorted(filtered[schema["road_category"]].dropna().astype(str).unique())
-        selected_categories = filter_cols[2].multiselect("Road category", options=category_options)
+        selected_categories = filter_cols[0].multiselect("Road category", options=category_options)
         if selected_categories:
             filtered = filtered[filtered[schema["road_category"]].isin(selected_categories)]
     else:
-        filter_cols[2].caption("Road category filter unavailable.")
+        filter_cols[0].caption("Road category filter unavailable.")
 
     if schema["speed_band"] and schema["speed_band"] in filtered.columns:
         band_series = pd.to_numeric(filtered[schema["speed_band"]], errors="coerce").dropna()
         band_options = sorted({int(value) for value in band_series if 1 <= value <= 8})
-        selected_bands = filter_cols[3].multiselect("Speed band", options=band_options)
+        selected_bands = filter_cols[1].multiselect("Speed band", options=band_options)
         if selected_bands:
             filtered = filtered[pd.to_numeric(filtered[schema["speed_band"]], errors="coerce").isin(selected_bands)]
     else:
-        filter_cols[3].caption("Speed band filter unavailable.")
+        filter_cols[1].caption("Speed band filter unavailable.")
 
     if schema["road_name"] and schema["road_name"] in filtered.columns:
         road_query = st.text_input("Road name contains", placeholder="Filter by road name")
@@ -502,21 +477,16 @@ def _render_distribution_analysis(filtered: pd.DataFrame, schema: dict[str, Opti
                 color_discrete_sequence=[CHART_COLORS["moderate"]],
             )
             st.plotly_chart(_apply_chart_style(fig), width="stretch")
-    elif "analysis_hour" not in filtered.columns or filtered["analysis_hour"].notna().sum() == 0:
-        st.info("Temporal distribution charts are hidden because the workbook does not include a timestamp column.")
-    else:
-        st.info("Temporal distribution charts are hidden because congestion could not be derived from the available columns.")
+
+
 
 
 def _render_temporal_patterns(filtered: pd.DataFrame) -> None:
-    st.markdown("#### Temporal Congestion Patterns")
 
     if "analysis_timestamp" not in filtered.columns or filtered["analysis_timestamp"].notna().sum() == 0:
-        st.info("This historical workbook looks like a static snapshot, so time-based trend analysis is not available.")
         return
 
     if "congestion_score" not in filtered.columns or filtered["congestion_score"].notna().sum() == 0:
-        st.info("Time-based trend analysis is unavailable because congestion could not be derived from the current schema.")
         return
 
     trend_granularity = st.selectbox(
@@ -776,27 +746,6 @@ def render_data_analysis_section() -> None:
 
     min_speed_col = schema.get("minimum_speed")
     max_speed_col = schema.get("maximum_speed")
-    if min_speed_col and max_speed_col and min_speed_col in filtered.columns and max_speed_col in filtered.columns:
-        st.markdown("#### Pattern Visualizations")
-        scatter_df = filtered.dropna(subset=[min_speed_col, max_speed_col]).copy()
-        if not scatter_df.empty:
-            fig = px.scatter(
-                scatter_df,
-                x=min_speed_col,
-                y=max_speed_col,
-                color="congestion_score" if "congestion_score" in scatter_df.columns else None,
-                title="Minimum vs Maximum Speed Pattern",
-                color_continuous_scale=[
-                    CHART_COLORS["fast"],
-                    CHART_COLORS["moderate"],
-                    CHART_COLORS["slow"],
-                    CHART_COLORS["severe"],
-                ],
-                hover_data=["segment_label"],
-            )
-            fig.update_layout(coloraxis_colorbar_title="Congestion")
-            st.plotly_chart(_apply_chart_style(fig, height=420), width="stretch")
-        else:
-            st.info("Speed scatter plot is unavailable because the filtered data has no valid minimum/maximum speed pairs.")
+
 
     st.markdown("</section>", unsafe_allow_html=True)
